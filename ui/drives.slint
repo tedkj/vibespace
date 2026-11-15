@@ -1,0 +1,198 @@
+// The first screen: every drive with its label, file system and used/free bar, a Scan button
+// each; the folders scanned lately; or Browse, or a folder dropped on the window.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme, Type, Icons, Icon, Button, ButtonKind, SectionLabel, Chamfer } from "@vibeware";
+import { DriveRow, RecentRow } from "types.slint";
+import { AppIcons, ShareBar } from "parts.slint";
+
+component DriveCard inherits Rectangle {
+    in property <DriveRow> drive;
+    in property <bool> inert;
+    callback scan();
+    height: 56px;
+    accessible-role: list-item;
+    accessible-label: root.drive.title;
+    accessible-description: root.drive.detail + (root.drive.free != "" ? ", " + root.drive.free : "");
+    accessible-action-default => { root.scan(); }
+    Chamfer {
+        width: 100%;
+        height: 100%;
+        fill: ta.has-hover ? Theme.surface-2 : Theme.surface;
+        stroke: Theme.line;
+    }
+    ta := TouchArea {
+        double-clicked => { root.scan(); }
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 10px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Icon { path: root.drive.network ? Icons.server : Icons.drive; tint: root.drive.state == 2 ? Theme.ink-3 : Theme.ink-2; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            width: 220px;
+            Text {
+                text: root.drive.title;
+                font-size: Type.small;
+                font-weight: Type.strong;
+                color: root.drive.state == 2 ? Theme.ink-3 : Theme.ink;
+                overflow: elide;
+                accessible-role: none;
+            }
+            Text {
+                text: root.drive.detail;
+                font-family: Type.mono;
+                font-size: Type.small;
+                color: Theme.ink-3;
+                overflow: elide;
+                accessible-role: none;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 5px;
+            horizontal-stretch: 1;
+            min-width: 60px;
+            if root.drive.state == 1: ShareBar { share: root.drive.used; fill: root.drive.used > 0.9 ? Theme.warn : Theme.ink-3; }
+            Text {
+                text: root.drive.free;
+                font-family: Type.mono;
+                font-size: Type.small;
+                color: root.drive.state == 1 && root.drive.used > 0.9 ? Theme.warn-text : Theme.ink-2;
+                overflow: elide;
+                accessible-role: none;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Button {
+                text: "Scan";
+                label: "Scan " + root.drive.title;
+                icon: AppIcons.scan;
+                kind: ButtonKind.secondary;
+                enabled: root.drive.state != 2;
+                inert: root.inert;
+                clicked => { root.scan(); }
+            }
+        }
+    }
+}
+
+component RecentLine inherits Rectangle {
+    in property <RecentRow> entry;
+    in property <bool> inert;
+    callback scan();
+    height: 34px;
+    accessible-role: list-item;
+    accessible-label: root.entry.path;
+    accessible-action-default => { root.scan(); }
+    background: ta.has-hover ? Theme.surface-2 : transparent;
+    ta := TouchArea {
+        double-clicked => { root.scan(); }
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 10px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Icon { path: Icons.folder; tint: Theme.accent; }
+        }
+        Text {
+            text: root.entry.path;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            alignment: center;
+            Button {
+                text: "Scan";
+                label: "Scan " + root.entry.path;
+                kind: ButtonKind.ghost;
+                inert: root.inert;
+                clicked => { root.scan(); }
+            }
+        }
+    }
+}
+
+export component DrivesView inherits Rectangle {
+    in property <[DriveRow]> drives;
+    in property <[RecentRow]> recent;
+    in property <bool> looking;
+    in property <bool> inert;
+    callback scan-drive(int);
+    callback scan-recent(int);
+    callback browse();
+
+    background: Theme.surface;
+
+    ScrollView {
+        VerticalLayout {
+            padding: 24px;
+            padding-top: 20px;
+            spacing: 10px;
+            alignment: start;
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: "What is eating your disk? Pick a drive, or a folder.";
+                    font-size: Type.body;
+                    font-weight: Type.strong;
+                    color: Theme.ink;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Button {
+                    text: "Browse";
+                    icon: Icons.folder-open;
+                    tooltip: "Pick a folder to scan";
+                    kind: ButtonKind.secondary;
+                    inert: root.inert;
+                    clicked => { root.browse(); }
+                }
+            }
+            Text {
+                text: "No admin rights needed. Nothing is changed by a scan; cleanup goes to the Recycle Bin, never straight to oblivion. A folder dropped on the window is scanned too.";
+                wrap: word-wrap;
+                font-size: Type.small;
+                color: Theme.ink-3;
+            }
+            Rectangle { height: 6px; }
+            SectionLabel { text: root.looking ? "drives · looking…" : "drives"; }
+            VerticalLayout {
+                spacing: 8px;
+                accessible-role: list;
+                accessible-label: "Drives";
+                for d[i] in root.drives: DriveCard {
+                    drive: d;
+                    inert: root.inert;
+                    scan => { root.scan-drive(i); }
+                }
+            }
+            if root.recent.length > 0: Rectangle { height: 6px; }
+            if root.recent.length > 0: SectionLabel { text: "scanned lately"; }
+            if root.recent.length > 0: VerticalLayout {
+                accessible-role: list;
+                accessible-label: "Scanned lately";
+                for r[i] in root.recent: RecentLine {
+                    entry: r;
+                    inert: root.inert;
+                    scan => { root.scan-recent(i); }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,84 @@
+// The data the window shows, as Rust hands it over. Rust owns every decision; these only carry.
+
+// One row of the folder tree. kind: 0 file, 1 folder, 2 link (not followed).
+// tag: what the row's state is in words ("no access", "hard link", "online only", "reading…");
+// tag-level 0 quiet, 1 warn.
+export struct TreeRow {
+    name: string,
+    size: string,
+    share: float,
+    pct: string,
+    files: string,
+    folders: string,
+    modified: string,
+    depth: int,
+    kind: int,
+    expandable: bool,
+    expanded: bool,
+    tag: string,
+    tag-level: int,
+    selected: bool,
+    cursor: bool,
+    // What a screen reader says after the name.
+    description: string,
+}
+
+// One extension of the Types table. swatch: its map colour (transparent: none of its own).
+export struct TypeRow {
+    ext: string,
+    size: string,
+    share: float,
+    pct: string,
+    count: string,
+    largest: string,
+    swatch: color,
+    selected: bool,
+    description: string,
+}
+
+// One of the largest files.
+export struct FileRow {
+    name: string,
+    folder: string,
+    size: string,
+    modified: string,
+    selected: bool,
+    cursor: bool,
+    tag: string,
+    description: string,
+}
+
+// A drive on the first screen. state: 0 looking, 1 known, 2 not available.
+export struct DriveRow {
+    root: string,
+    title: string,
+    detail: string,
+    used: float,
+    free: string,
+    state: int,
+    network: bool,
+}
+
+export struct RecentRow {
+    path: string,
+}
+
+export struct LegendItem {
+    name: string,
+    swatch: color,
+}
+
+// One line of a move's plan: FROM, TO, SIZE, ... and its value.
+export struct MoveFact {
+    label: string,
+    value: string,
+}
+
+// A rectangle over the map (logical pixels), drawn when `shown`.
+export struct Mark {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    shown: bool,
+}

@@ -1,0 +1,216 @@
+// The map: one image Rust draws (thousands of tiles cost one blit), the hovered and the
+// selected tile outlined over it, the hovered tile's path and size in the line below, and the
+// legend of the top extensions' colours.
+
+import { Theme, Type, Icons, Icon, IconButton, Button, ButtonKind } from "@vibeware";
+import { LegendItem, Mark } from "types.slint";
+import { AppIcons, Swatch } from "parts.slint";
+
+export component MapView inherits Rectangle {
+    in property <image> image;
+    in property <length> image-w;
+    in property <length> image-h;
+    in property <string> title;
+    in property <string> total;
+    in property <bool> can-up;
+    in property <Mark> hover-mark;
+    in property <Mark> select-mark;
+    in property <string> hover-text;
+    in property <string> hover-size;
+    in property <[LegendItem]> legend;
+    in property <string> filter-text;
+    in property <string> empty-text;
+    in property <bool> inert;
+    callback resized(length, length);
+    callback hovered(length, length);
+    callback left();
+    callback clicked(length, length);
+    callback double(length, length);
+    callback up();
+    callback clear-filter();
+
+    background: Theme.surface;
+    accessible-role: groupbox;
+    accessible-label: "Map";
+
+    VerticalLayout {
+        // What the map shows, and the way back up.
+        Rectangle {
+            height: 36px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 12px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: Icons.up;
+                        label: "Up one level";
+                        tooltip: "Up one level (Backspace)";
+                        enabled: root.can-up;
+                        inert: root.inert;
+                        clicked => { root.up(); }
+                    }
+                }
+                Text {
+                    text: root.title;
+                    font-family: Type.mono;
+                    font-size: Type.small;
+                    color: Theme.ink;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                }
+                Text {
+                    text: root.total;
+                    font-family: Type.mono;
+                    font-size: Type.small;
+                    color: Theme.ink-2;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+
+        area := Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            changed width => { root.resized(self.width, self.height); }
+            changed height => { root.resized(self.width, self.height); }
+            Image {
+                x: 0;
+                y: 0;
+                width: root.image-w;
+                height: root.image-h;
+                source: root.image;
+                image-rendering: pixelated;
+                accessible-role: AccessibleRole.image;
+                accessible-label: "Map of " + root.title;
+            }
+            if root.select-mark.shown: Rectangle {
+                x: root.select-mark.x;
+                y: root.select-mark.y;
+                width: root.select-mark.w;
+                height: root.select-mark.h;
+                border-width: 2px;
+                border-color: Theme.accent;
+            }
+            if root.hover-mark.shown: Rectangle {
+                x: root.hover-mark.x;
+                y: root.hover-mark.y;
+                width: root.hover-mark.w;
+                height: root.hover-mark.h;
+                border-width: 1px;
+                border-color: Theme.ink;
+            }
+            if root.empty-text != "": Text {
+                text: root.empty-text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                color: Theme.ink-3;
+                font-size: Type.small;
+            }
+            TouchArea {
+                enabled: !root.inert;
+                // `moved` only fires while pressed: the pointer's own position is followed.
+                changed mouse-x => {
+                    if (self.has-hover) {
+                        root.hovered(self.mouse-x, self.mouse-y);
+                    }
+                }
+                changed mouse-y => {
+                    if (self.has-hover) {
+                        root.hovered(self.mouse-x, self.mouse-y);
+                    }
+                }
+                changed has-hover => {
+                    if (self.has-hover) {
+                        root.hovered(self.mouse-x, self.mouse-y);
+                    } else {
+                        root.left();
+                    }
+                }
+                clicked => { root.clicked(self.mouse-x, self.mouse-y); }
+                double-clicked => { root.double(self.mouse-x, self.mouse-y); }
+            }
+        }
+
+        // The hovered tile, or how the map works.
+        Rectangle { height: 1px; background: Theme.line; }
+        Rectangle {
+            height: 26px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+                Text {
+                    text: root.hover-text != "" ? root.hover-text : "Click selects in the tree · double-click zooms in · Backspace zooms out";
+                    font-family: root.hover-text != "" ? Type.mono : Type.ui;
+                    font-size: Type.small;
+                    color: root.hover-text != "" ? Theme.ink : Theme.ink-3;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                }
+                if root.hover-size != "": Text {
+                    text: root.hover-size;
+                    font-family: Type.mono;
+                    font-size: Type.small;
+                    color: Theme.ink;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        // The colours.
+        Rectangle { height: 1px; background: Theme.line; }
+        Rectangle {
+            height: 30px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 6px;
+                spacing: 12px;
+                if root.filter-text == "": HorizontalLayout {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    spacing: 12px;
+                    alignment: start;
+                    for l in root.legend: HorizontalLayout {
+                        spacing: 5px;
+                        VerticalLayout {
+                            alignment: center;
+                            Swatch { colour: l.swatch; }
+                        }
+                        Text {
+                            text: l.name;
+                            font-family: Type.mono;
+                            font-size: Type.small;
+                            color: Theme.ink-2;
+                            vertical-alignment: center;
+                            accessible-role: none;
+                        }
+                    }
+                }
+                if root.filter-text != "": Text {
+                    text: root.filter-text;
+                    font-size: Type.small;
+                    color: Theme.ink;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                if root.filter-text != "": VerticalLayout {
+                    alignment: center;
+                    Button {
+                        text: "Show all";
+                        kind: ButtonKind.ghost;
+                        inert: root.inert;
+                        clicked => { root.clear-filter(); }
+                    }
+                }
+            }
+        }
+    }
+}

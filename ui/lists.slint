@@ -1,0 +1,349 @@
+// The Types table (by extension) and the largest files: virtualized lists, one accessibility
+// node per row.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Type, Icons, Icon } from "@vibeware";
+import { TypeRow, FileRow } from "types.slint";
+import { Head, ShareBar, Swatch } from "parts.slint";
+import { Cols } from "tree.slint";
+
+component TypeItem inherits Rectangle {
+    in property <TypeRow> item;
+    in property <bool> wide;
+    callback clicked();
+    height: Theme.row-h;
+    accessible-role: list-item;
+    accessible-label: root.item.ext;
+    accessible-description: root.item.description;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.item.selected;
+    accessible-action-default => { root.clicked(); }
+    background: root.item.selected ? Theme.accent-soft : ta.has-hover ? Theme.surface-2 : transparent;
+    if root.item.selected: Rectangle {
+        x: 0;
+        width: 2px;
+        background: Theme.accent;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+        VerticalLayout {
+            alignment: center;
+            width: 16px;
+            HorizontalLayout {
+                alignment: center;
+                Swatch { colour: root.item.swatch; }
+            }
+        }
+        Text {
+            text: root.item.ext;
+            accessible-role: none;
+            width: 96px;
+            overflow: elide;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.item.size;
+            accessible-role: none;
+            width: Cols.size;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            width: Cols.bar;
+            ShareBar { share: root.item.share; }
+        }
+        Text {
+            text: root.item.pct;
+            accessible-role: none;
+            width: Cols.pct;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-2;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.item.count;
+            accessible-role: none;
+            width: Cols.files;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-2;
+            vertical-alignment: center;
+        }
+        Rectangle { width: 6px; }
+        Text {
+            text: root.item.largest;
+            accessible-role: none;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            overflow: elide;
+            font-size: Type.small;
+            color: Theme.ink-3;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component TypesTable inherits Rectangle {
+    in property <[TypeRow]> rows;
+    in property <string> metric-head: "ON DISK";
+    in property <bool> inert;
+    callback row-clicked(int);
+
+    accessible-role: groupbox;
+    accessible-label: "Types";
+
+    public function focus-list() {
+        types-focus.focus();
+    }
+
+    VerticalLayout {
+        Rectangle {
+            height: 24px;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 6px;
+                Rectangle { width: 16px; }
+                Head { text: "TYPE"; width: 96px; }
+                Head { text: root.metric-head; width: Cols.size; horizontal-alignment: right; }
+                Head { text: "SHARE"; width: Cols.bar + Cols.pct + 6px; horizontal-alignment: right; }
+                Head { text: "FILES"; width: Cols.files; horizontal-alignment: right; }
+                Rectangle { width: 6px; }
+                Head { text: "LARGEST"; horizontal-stretch: 1; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        // A focus of its own, so the window's keys (Escape) keep working on this tab.
+        types-focus := FocusScope {
+            vertical-stretch: 1;
+            accessible-role: AccessibleRole.list;
+            accessible-label: "Types list";
+            focus-on-tab-navigation: !root.inert;
+            list := ListView {
+                for r[i] in root.rows: TypeItem {
+                    item: r;
+                    clicked => {
+                        types-focus.focus();
+                        root.row-clicked(i);
+                    }
+                }
+            }
+        }
+    }
+}
+
+component FileItem inherits Rectangle {
+    in property <FileRow> item;
+    in property <bool> focused;
+    in property <bool> show-modified;
+    callback pressed(bool, bool);
+    callback double();
+    callback context(length, length);
+    height: Theme.row-h;
+    accessible-role: list-item;
+    accessible-label: root.item.name;
+    accessible-description: root.item.description;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.item.selected;
+    accessible-action-default => { root.double(); }
+    background: root.item.selected ? Theme.accent-soft : ta.has-hover ? Theme.surface-2 : transparent;
+    border-width: root.item.cursor && root.focused ? 1px : 0;
+    border-color: Theme.accent;
+    if root.item.selected: Rectangle {
+        x: 0;
+        width: 2px;
+        background: Theme.accent;
+    }
+    ta := TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                root.pressed(e.modifiers.control, e.modifiers.shift);
+            }
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                root.context(root.absolute-position.x + self.mouse-x, root.absolute-position.y + self.mouse-y);
+            }
+        }
+        double-clicked => { root.double(); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Icon { path: Icons.file; tint: Theme.ink-3; }
+        }
+        // Name, then the folder it is in (cut first: the name matters more).
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            min-width: 40px;
+            spacing: 8px;
+            Text {
+                text: root.item.name;
+                accessible-role: none;
+                overflow: elide;
+                color: Theme.ink;
+                font-size: Type.small;
+                vertical-alignment: center;
+                horizontal-stretch: 0;
+                max-width: self.preferred-width;
+                min-width: Math.min(self.preferred-width, 120px);
+            }
+            Text {
+                text: root.item.folder;
+                accessible-role: none;
+                overflow: elide;
+                font-family: Type.mono;
+                color: Theme.ink-3;
+                font-size: Type.small;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                min-width: 0px;
+            }
+        }
+        if root.item.tag != "": Text {
+            text: root.item.tag;
+            accessible-role: none;
+            color: Theme.ink-3;
+            font-size: Type.small;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.item.size;
+            accessible-role: none;
+            width: Cols.size;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink;
+            vertical-alignment: center;
+        }
+        if root.show-modified: Text {
+            text: root.item.modified;
+            accessible-role: none;
+            width: 116px;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-3;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component LargestTable inherits Rectangle {
+    in property <[FileRow]> rows;
+    in property <string> metric-head: "ON DISK";
+    in property <int> cursor-index: -1;
+    in property <int> scroll-seq;
+    in property <bool> inert;
+    callback row-pressed(int, bool, bool);
+    callback row-double(int);
+    callback row-context(int, length, length);
+    callback list-key(string, bool, bool, int) -> bool;
+
+    // Its own size never depends on the columns it shows (they follow its width).
+    min-width: 0px;
+    preferred-width: 0px;
+    max-width: 100000px;
+    horizontal-stretch: 1;
+    property <bool> show-modified: root.width >= 520px;
+
+    public function focus-list() {
+        list-focus.focus();
+    }
+
+    // A scroll in the `changed` handler lands before layout: run it from a 1 ms timer, twice
+    // (End left the last row partly out of sight after one pass).
+    property <int> scroll-passes;
+    changed scroll-seq => {
+        root.scroll-passes = 0;
+        scroll.running = true;
+    }
+    scroll := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            root.scroll-passes += 1;
+            if (root.scroll-passes >= 2) {
+                self.running = false;
+            }
+            if (root.cursor-index >= 0) {
+                let top = root.cursor-index * Theme.row-h;
+                if (top < -list.content-y) {
+                    list.content-y = -top;
+                } else if (top + Theme.row-h > -list.content-y + list.visible-height) {
+                    list.content-y = -(top + Theme.row-h - list.visible-height);
+                }
+            }
+        }
+    }
+
+    accessible-role: groupbox;
+    accessible-label: "Largest files";
+
+    VerticalLayout {
+        Rectangle {
+            height: 24px;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                Rectangle { width: 16px; }
+                Head { text: "FILE"; horizontal-stretch: 1; }
+                Head { text: root.metric-head; width: Cols.size; horizontal-alignment: right; }
+                if root.show-modified: Head { text: "MODIFIED"; width: 116px; horizontal-alignment: right; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            list-focus := FocusScope {
+                accessible-role: AccessibleRole.list;
+                accessible-label: "Largest files list";
+                focus-on-tab-navigation: !root.inert;
+                key-pressed(e) => {
+                    if (root.list-key(e.text, e.modifiers.control, e.modifiers.shift, Math.max(1, Math.floor(list.visible-height / Theme.row-h) - 1))) {
+                        return accept;
+                    }
+                    reject
+                }
+                list := ListView {
+                    for r[i] in root.rows: FileItem {
+                        item: r;
+                        focused: list-focus.has-focus;
+                        show-modified: root.show-modified;
+                        pressed(ctrl, shift) => {
+                            list-focus.focus();
+                            root.row-pressed(i, ctrl, shift);
+                        }
+                        double => { root.row-double(i); }
+                        context(x, y) => {
+                            list-focus.focus();
+                            root.row-context(i, x, y);
+                        }
+                    }
+                }
+                Rectangle {
+                    border-width: list-focus.has-focus ? 1px : 0;
+                    border-color: Theme.focus.with-alpha(0.35);
+                }
+            }
+        }
+    }
+}

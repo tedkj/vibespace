@@ -1,0 +1,274 @@
+// The folder tree: every folder sized, the largest first, expandable like Explorer's. A
+// virtualized list: a million rows cost what thirty do; one accessibility node per row.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Type, Icons, Icon } from "@vibeware";
+import { TreeRow } from "types.slint";
+import { AppIcons, Head, ShareBar } from "parts.slint";
+
+export global Cols {
+    out property <length> size: 68px;
+    out property <length> bar: 40px;
+    out property <length> pct: 52px;
+    out property <length> files: 68px;
+    out property <length> folders: 68px;
+    out property <length> modified: 80px;
+    out property <length> indent: 16px;
+}
+
+component TreeItem inherits Rectangle {
+    in property <TreeRow> item;
+    in property <bool> focused;
+    in property <bool> show-folders;
+    in property <bool> show-modified;
+    callback pressed(bool, bool);
+    callback toggle();
+    callback double();
+    callback context(length, length);
+
+    height: Theme.row-h;
+    accessible-role: list-item;
+    accessible-label: root.item.name;
+    accessible-description: root.item.description;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.item.selected;
+    accessible-expandable: root.item.expandable;
+    accessible-action-default => { root.double(); }
+    accessible-action-expand => { root.toggle(); }
+
+    background: root.item.selected ? Theme.accent-soft : ta.has-hover ? Theme.surface-2 : transparent;
+    border-width: root.item.cursor && root.focused ? 1px : 0;
+    border-color: Theme.accent;
+    if root.item.selected: Rectangle {
+        x: 0;
+        width: 2px;
+        background: Theme.accent;
+    }
+    ta := TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                root.pressed(e.modifiers.control, e.modifiers.shift);
+            }
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                root.context(root.absolute-position.x + self.mouse-x, root.absolute-position.y + self.mouse-y);
+            }
+        }
+        double-clicked => { root.double(); }
+    }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 10px;
+        spacing: 6px;
+        Rectangle { width: root.item.depth * Cols.indent; }
+        Rectangle {
+            width: 16px;
+            if root.item.expandable: Icon {
+                y: (parent.height - self.height) / 2;
+                path: root.item.expanded ? Icons.chevron-down : Icons.chevron-right;
+                tint: chev.has-hover ? Theme.ink : Theme.ink-3;
+            }
+            chev := TouchArea {
+                enabled: root.item.expandable;
+                clicked => { root.toggle(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                path: root.item.kind == 2 ? Icons.link : root.item.kind == 1 ? Icons.folder : Icons.file;
+                tint: root.item.kind == 1 ? Theme.accent : Theme.ink-3;
+            }
+        }
+        HorizontalLayout {
+            horizontal-stretch: 1;
+            min-width: 40px;
+            spacing: 8px;
+            Text {
+                text: root.item.name;
+                accessible-role: none;
+                overflow: elide;
+                color: Theme.ink;
+                font-size: Type.small;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                min-width: 24px;
+            }
+            if root.item.tag != "": Text {
+                text: root.item.tag;
+                accessible-role: none;
+                color: root.item.tag-level == 1 ? Theme.warn-text : Theme.ink-3;
+                font-size: Type.small;
+                vertical-alignment: center;
+                horizontal-stretch: 0;
+            }
+        }
+        Text {
+            text: root.item.size;
+            accessible-role: none;
+            width: Cols.size;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            width: Cols.bar;
+            ShareBar { share: root.item.share; }
+        }
+        Text {
+            text: root.item.pct;
+            accessible-role: none;
+            width: Cols.pct;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-2;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.item.files;
+            accessible-role: none;
+            width: Cols.files;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-2;
+            vertical-alignment: center;
+        }
+        if root.show-folders: Text {
+            text: root.item.folders;
+            accessible-role: none;
+            width: Cols.folders;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-2;
+            vertical-alignment: center;
+        }
+        if root.show-modified: Text {
+            text: root.item.modified;
+            accessible-role: none;
+            width: Cols.modified;
+            horizontal-alignment: right;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-3;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component TreeTable inherits Rectangle {
+    in property <[TreeRow]> rows;
+    in property <string> metric-head: "ON DISK";
+    in property <int> cursor-index: -1;
+    in property <int> scroll-seq;
+    in property <bool> inert;
+    callback row-pressed(int, bool, bool);
+    callback row-toggle(int);
+    callback row-double(int);
+    callback row-context(int, length, length);
+    // text, ctrl, shift, rows per page
+    callback list-key(string, bool, bool, int) -> bool;
+
+    // Its own size never depends on the columns it shows (they follow its width).
+    min-width: 0px;
+    preferred-width: 0px;
+    max-width: 100000px;
+    horizontal-stretch: 1;
+    // The same widths the controller fits the root's path to.
+    property <bool> show-folders: root.width >= 560px;
+    property <bool> show-modified: root.width >= 640px;
+
+    public function focus-list() {
+        list-focus.focus();
+    }
+
+    // A scroll in the `changed` handler lands before layout: run it from a 1 ms timer, twice
+    // (End left the last row partly out of sight after one pass).
+    property <int> scroll-passes;
+    changed scroll-seq => {
+        root.scroll-passes = 0;
+        scroll.running = true;
+    }
+    scroll := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            root.scroll-passes += 1;
+            if (root.scroll-passes >= 2) {
+                self.running = false;
+            }
+            if (root.cursor-index >= 0) {
+                let top = root.cursor-index * Theme.row-h;
+                if (top < -list.content-y) {
+                    list.content-y = -top;
+                } else if (top + Theme.row-h > -list.content-y + list.visible-height) {
+                    list.content-y = -(top + Theme.row-h - list.visible-height);
+                }
+            }
+        }
+    }
+
+    accessible-role: groupbox;
+    accessible-label: "Folders";
+
+    VerticalLayout {
+        // Column heads.
+        Rectangle {
+            height: 24px;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 10px;
+                spacing: 6px;
+                // Over the names: past the chevron and the icon.
+                Rectangle { width: 16px + 6px + 16px; }
+                Head { text: "NAME"; horizontal-stretch: 1; }
+                Head { text: root.metric-head; width: Cols.size; horizontal-alignment: right; }
+                Head { text: "SHARE"; width: Cols.bar + Cols.pct + 6px; horizontal-alignment: right; }
+                Head { text: "FILES"; width: Cols.files; horizontal-alignment: right; }
+                if root.show-folders: Head { text: "FOLDERS"; width: Cols.folders; horizontal-alignment: right; }
+                if root.show-modified: Head { text: "MODIFIED"; width: Cols.modified; horizontal-alignment: right; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            list-focus := FocusScope {
+                accessible-role: AccessibleRole.list;
+                accessible-label: "Folder tree";
+                focus-on-tab-navigation: !root.inert;
+                key-pressed(e) => {
+                    if (root.list-key(e.text, e.modifiers.control, e.modifiers.shift, Math.max(1, Math.floor(list.visible-height / Theme.row-h) - 1))) {
+                        return accept;
+                    }
+                    reject
+                }
+                list := ListView {
+                    for r[i] in root.rows: TreeItem {
+                        item: r;
+                        focused: list-focus.has-focus;
+                        show-folders: root.show-folders;
+                        show-modified: root.show-modified;
+                        pressed(ctrl, shift) => {
+                            list-focus.focus();
+                            root.row-pressed(i, ctrl, shift);
+                        }
+                        toggle => { root.row-toggle(i); }
+                        double => { root.row-double(i); }
+                        context(x, y) => {
+                            list-focus.focus();
+                            root.row-context(i, x, y);
+                        }
+                    }
+                }
+                Rectangle {
+                    border-width: list-focus.has-focus ? 1px : 0;
+                    border-color: Theme.focus.with-alpha(0.35);
+                }
+            }
+        }
+    }
+}

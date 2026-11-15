@@ -1,0 +1,583 @@
+// VibeSpace's main window. Layout and drawing only; every decision is made in Rust.
+
+import { Theme, Type, Icons, Icon, Chamfer, IconButton, Button, ButtonKind, Segmented, TipLayer, Toast, ToastKind, ProgressBar, Menu, MenuEntry, Field } from "@vibeware";
+import { Brand, AboutDialog, CheckRow } from "brand.slint";
+import { TreeRow, TypeRow, FileRow, DriveRow, RecentRow, LegendItem, Mark, MoveFact } from "types.slint";
+import { AppIcons, Fact } from "parts.slint";
+import { TreeTable } from "tree.slint";
+import { TypesTable, LargestTable } from "lists.slint";
+import { MapView } from "map.slint";
+import { DrivesView } from "drives.slint";
+import { RecycleDialog, MoveDialog } from "dialogs.slint";
+
+export { TreeRow, TypeRow, FileRow, DriveRow, RecentRow, LegendItem, Mark, MoveFact }
+
+export struct ToastItem {
+    id: int,
+    text: string,
+    kind: ToastKind,
+    action: string,
+}
+
+export component AppWindow inherits Window {
+    // "D:\Photos · VibeSpace" once something is scanned: two windows tell themselves apart.
+    in property <string> window-title: "VibeSpace";
+    title: root.window-title;
+    icon: @image-url("../assets/app-128.png");
+    preferred-width: 1180px;
+    preferred-height: 720px;
+    min-width: 900px;
+    min-height: 540px;
+    background: Theme.bg;
+    default-font-family: Type.ui;
+    default-font-size: Type.small;
+    default-font-weight: Type.regular;
+
+    in property <string> version;
+    in property <string> status-left;
+    in property <string> status-right;
+    in property <bool> status-warn;
+    in property <[ToastItem]> toasts;
+    in-out property <bool> about-open;
+    // About's version line and its install check (the controller's words and states).
+    in property <string> about-line;
+    in property <[CheckRow]> check-rows;
+    in property <bool> checking;
+    in property <bool> checked;
+
+    // What is scanned, and how far.
+    in property <string> folder;
+    in property <int> folder-seq;
+    in property <bool> has-scan;
+    in property <bool> scanning;
+    // 0..1 against a drive's used space; below 0: working, how far unknown; below -1.5: none.
+    in property <float> progress: -2;
+    in property <int> metric: 1;
+    in property <int> tab;
+    // The summary strip.
+    in property <string> fact-path;
+    in property <string> fact-total;
+    in property <string> fact-disk;
+    in property <string> fact-files;
+    in property <string> fact-folders;
+    in property <string> fact-free;
+    in property <string> fact-time;
+    in property <bool> fact-partial;
+    // The first screen.
+    in property <[DriveRow]> drives;
+    in property <[RecentRow]> recent;
+    in property <bool> drives-looking;
+    // The lists.
+    in property <[TreeRow]> rows;
+    in property <int> cursor-index: -1;
+    in property <int> scroll-seq;
+    in property <[TypeRow]> type-rows;
+    in property <[FileRow]> file-rows;
+    in property <int> file-cursor: -1;
+    in property <int> file-scroll-seq;
+    // The actions on the selection.
+    in property <bool> can-open;
+    in property <bool> can-recycle;
+    in property <bool> can-rescan;
+    in property <string> recycle-tip: "Move to the Recycle Bin (Delete)";
+    in property <[MenuEntry]> menu-entries;
+    // The map.
+    in property <image> map-image;
+    in property <length> map-image-w;
+    in property <length> map-image-h;
+    in property <string> map-title;
+    in property <string> map-total;
+    in property <bool> map-can-up;
+    in property <Mark> map-hover-mark;
+    in property <Mark> map-select-mark;
+    in property <string> map-hover-text;
+    in property <string> map-hover-size;
+    in property <[LegendItem]> legend;
+    in property <string> map-filter-text;
+    in property <string> map-empty-text;
+    // The question.
+    in-out property <bool> recycle-open;
+    in property <string> recycle-what;
+    in property <string> recycle-total;
+    in property <string> recycle-note;
+    in property <bool> drop-hover;
+    // Move to another drive: the plan, the progress, or a move that did not finish.
+    // move-state: 0 checking, 1 the plan, 2 moving, 3 a move that did not finish, 4 one that cannot
+    // go on (where each side is), 5 forget its record?
+    in-out property <bool> move-open;
+    in property <int> move-state;
+    in property <string> move-title;
+    in property <[MoveFact]> move-facts;
+    in property <string> move-link;
+    in property <[string]> move-warnings;
+    in property <[string]> move-refusals;
+    in property <string> move-note;
+    in property <string> move-go;
+    in property <bool> move-can-go;
+    in property <string> move-cancel;
+    in property <bool> move-can-cancel;
+    // 0..1; below 0: working, how far unknown; below -1.5: none.
+    in property <float> move-progress: -2;
+    in property <string> move-progress-text;
+    in property <string> move-file;
+
+    out property <bool> dialog-open: root.about-open || root.recycle-open || root.move-open;
+    property <bool> inert: root.dialog-open;
+
+    callback toggle-theme();
+    // About: "Check this install" pressed (the controller runs it on a worker, once at a time),
+    // and the website link.
+    callback check-install();
+    callback open-site();
+    callback toast-action(int);
+    callback toast-dismissed(int);
+    callback dialogs-closed();
+    callback copy-text(string) -> bool;
+    callback folder-accepted(string);
+    callback folder-edited(string);
+    callback browse();
+    callback scan-or-cancel();
+    callback show-drives();
+    callback metric-picked(int);
+    callback tab-picked(int);
+    callback scan-drive(int);
+    callback scan-recent(int);
+    callback row-pressed(int, bool, bool);
+    callback row-toggle(int);
+    callback row-double(int);
+    callback row-context(int, length, length);
+    callback list-key(string, bool, bool, int) -> bool;
+    callback type-clicked(int);
+    callback file-pressed(int, bool, bool);
+    callback file-double(int);
+    callback file-context(int, length, length);
+    callback file-key(string, bool, bool, int) -> bool;
+    callback act-open();
+    callback act-reveal();
+    callback act-copy();
+    callback act-rescan();
+    callback act-recycle();
+    callback act-more(length, length);
+    callback menu-picked(int);
+    callback map-resized(length, length);
+    callback map-hovered(length, length);
+    callback map-left();
+    callback map-clicked(length, length);
+    callback map-double(length, length);
+    callback map-up();
+    callback map-clear-filter();
+    callback recycle-confirmed();
+    callback recycle-cancelled();
+    callback move-confirmed();
+    callback move-cancelled();
+    // Keys nothing else took: text, ctrl, shift.
+    callback window-key(string, bool, bool) -> bool;
+
+    public function focus-list() {
+        if (root.tab == 0) {
+            tree-table.focus-list();
+        } else if (root.tab == 1) {
+            types-table.focus-list();
+        } else {
+            largest-table.focus-list();
+        }
+    }
+
+    property <length> menu-x;
+    property <length> menu-y;
+    public function open-menu(x: length, y: length) {
+        root.menu-x = Math.max(4px, Math.min(x, root.width - 244px));
+        root.menu-y = Math.max(4px, Math.min(y, root.height - root.menu-entries.length * Theme.row-h - 16px));
+        menu.show();
+    }
+
+    changed dialog-open => {
+        if (!self.dialog-open) {
+            root.dialogs-closed();
+        }
+    }
+    changed folder-seq => {
+        folder-field.text = root.folder;
+    }
+
+    keys := FocusScope {
+        focus-on-click: false;
+        // The window's key catcher is no Tab stop: a Tab past a dialog's last button must not land
+        // here, where Escape would not reach the dialog (About v2 has three stops; 2026-11-04).
+        focus-on-tab-navigation: false;
+        key-pressed(e) => {
+            if (!root.dialog-open && root.window-key(e.text, e.modifiers.control, e.modifiers.shift)) {
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            // ---- the bar ----
+            Rectangle {
+                height: 48px;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    Brand { horizontal-stretch: 0; }
+                    Rectangle { width: 14px; }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        folder-field := Field {
+                            label: "FOLDER";
+                            a11y-name: "Folder";
+                            placeholder: "C:\\ or D:\\Photos";
+                            mono: true;
+                            text: root.folder;
+                            inert: root.inert;
+                            edited(t) => { root.folder-edited(t); }
+                            accepted(t) => { root.folder-accepted(t); }
+                            // Escape puts the text back and goes no further; with nothing
+                            // to put back it goes on (a scan under way cancels).
+                            escaped => {
+                                if (self.text == root.folder) {
+                                    return false;
+                                }
+                                self.text = root.folder;
+                                root.folder-edited(root.folder);
+                                true
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Button { text: "Browse"; icon: Icons.folder-open; tooltip: "Pick a folder to scan"; inert: root.inert; clicked => { root.browse(); } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            text: root.scanning ? "Cancel" : "Scan";
+                            icon: root.scanning ? Icons.stop : AppIcons.scan;
+                            kind: root.scanning ? ButtonKind.secondary : ButtonKind.primary;
+                            tooltip: root.scanning ? "Stop the scan (Escape)" : "Scan the folder (Enter)";
+                            inert: root.inert;
+                            clicked => { root.scan-or-cancel(); }
+                        }
+                    }
+                    Rectangle { width: 8px; }
+                    VerticalLayout {
+                        alignment: center;
+                        Segmented {
+                            label: "Size shown";
+                            options: ["Size", "On disk"];
+                            selected: root.metric;
+                            controlled: true;
+                            inert: root.inert;
+                            changed(i) => { root.metric-picked(i); }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton { icon: Icons.drive; label: "Drives"; tooltip: "All drives"; inert: root.inert; active: !root.has-scan; clicked => { root.show-drives(); } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton { icon: Icons.theme; label: "Theme"; tooltip: Theme.dark ? "Light theme" : "Dark theme"; inert: root.inert; clicked => { root.toggle-theme(); } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: Icons.info;
+                            label: "About";
+                            tooltip: "About VibeSpace";
+                            inert: root.inert;
+                            clicked => {
+                                menu.close();
+                                root.about-open = true;
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.line; }
+
+            // ---- the answer first ----
+            if root.has-scan: Rectangle {
+                height: 64px;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    padding-top: 10px;
+                    padding-bottom: 10px;
+                    spacing: 8px;
+                    Fact { label: root.fact-partial ? "SCANNED (PARTIAL)" : "SCANNED"; value: root.fact-path; horizontal-stretch: 1; min-width: 120px; warn: root.fact-partial; }
+                    Fact { label: "TOTAL"; value: root.fact-total; strong: root.metric == 0; }
+                    Fact { label: "ON DISK"; value: root.fact-disk; strong: root.metric == 1; }
+                    Fact { label: "FILES"; value: root.fact-files; }
+                    Fact { label: "FOLDERS"; value: root.fact-folders; }
+                    Fact { label: "FREE"; value: root.fact-free; }
+                    Fact { label: "TIME"; value: root.fact-time; }
+                }
+                if root.progress > -1.5: ProgressBar {
+                    y: parent.height - 3px;
+                    width: parent.width;
+                    value: root.progress;
+                }
+            }
+            if root.has-scan: Rectangle { height: 1px; background: Theme.line; }
+
+            // ---- the work area: the drives, or the scan ----
+            Rectangle {
+                vertical-stretch: 1;
+                DrivesView {
+                    width: 100%;
+                    height: 100%;
+                    visible: !root.has-scan;
+                    drives: root.drives;
+                    recent: root.recent;
+                    looking: root.drives-looking;
+                    inert: root.inert || root.has-scan;
+                    scan-drive(i) => { root.scan-drive(i); }
+                    scan-recent(i) => { root.scan-recent(i); }
+                    browse => { root.browse(); }
+                }
+                HorizontalLayout {
+                    width: 100%;
+                    height: 100%;
+                    visible: root.has-scan;
+                    // The lists.
+                    Rectangle {
+                        // 55 : 45 of the width, whatever either side would like.
+                        horizontal-stretch: 55;
+                        preferred-width: 0px;
+                        min-width: 360px;
+                        background: Theme.surface;
+                        VerticalLayout {
+                            Rectangle {
+                                height: 40px;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 6px;
+                                    spacing: 2px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Segmented {
+                                            label: "View";
+                                            options: ["Folders", "Types", "Largest files"];
+                                            selected: root.tab;
+                                            controlled: true;
+                                            inert: root.inert;
+                                            changed(i) => { root.tab-picked(i); }
+                                        }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        IconButton { icon: Icons.external; label: "Open"; tooltip: "Open (Enter)"; enabled: root.can-open; inert: root.inert; clicked => { root.act-open(); } }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        IconButton { icon: Icons.folder-open; label: "Show in Explorer"; tooltip: "Show in Explorer"; enabled: root.can-open; inert: root.inert; clicked => { root.act-reveal(); } }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        IconButton { icon: Icons.copy; label: "Copy path"; tooltip: "Copy path (Ctrl+C)"; enabled: root.can-open; inert: root.inert; clicked => { root.act-copy(); } }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        IconButton { icon: Icons.refresh; label: "Rescan this folder"; tooltip: "Rescan this folder (F5)"; enabled: root.can-rescan; inert: root.inert; clicked => { root.act-rescan(); } }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        IconButton { icon: Icons.trash; label: "Move to Recycle Bin"; tooltip: root.recycle-tip; enabled: root.can-recycle; inert: root.inert; clicked => { root.act-recycle(); } }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        more := IconButton {
+                                            icon: Icons.menu;
+                                            label: "More";
+                                            tooltip: "Copy the listing, save as CSV";
+                                            inert: root.inert;
+                                            clicked => { root.act-more(self.absolute-position.x + self.width - 220px, self.absolute-position.y + self.height + 2px); }
+                                        }
+                                    }
+                                }
+                                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+                            }
+                            Rectangle {
+                                vertical-stretch: 1;
+                                tree-table := TreeTable {
+                                    width: 100%;
+                                    height: 100%;
+                                    visible: root.tab == 0;
+                                    rows: root.rows;
+                                    metric-head: root.metric == 0 ? "SIZE" : "ON DISK";
+                                    cursor-index: root.cursor-index;
+                                    scroll-seq: root.scroll-seq;
+                                    inert: root.inert || root.tab != 0 || !root.has-scan;
+                                    row-pressed(i, c, s) => { root.row-pressed(i, c, s); }
+                                    row-toggle(i) => { root.row-toggle(i); }
+                                    row-double(i) => { root.row-double(i); }
+                                    row-context(i, x, y) => { root.row-context(i, x, y); }
+                                    list-key(t, c, s, p) => { root.list-key(t, c, s, p) }
+                                }
+                                types-table := TypesTable {
+                                    width: 100%;
+                                    height: 100%;
+                                    visible: root.tab == 1;
+                                    rows: root.type-rows;
+                                    metric-head: root.metric == 0 ? "SIZE" : "ON DISK";
+                                    inert: root.inert || root.tab != 1;
+                                    row-clicked(i) => { root.type-clicked(i); }
+                                }
+                                largest-table := LargestTable {
+                                    width: 100%;
+                                    height: 100%;
+                                    visible: root.tab == 2;
+                                    rows: root.file-rows;
+                                    metric-head: root.metric == 0 ? "SIZE" : "ON DISK";
+                                    cursor-index: root.file-cursor;
+                                    scroll-seq: root.file-scroll-seq;
+                                    inert: root.inert || root.tab != 2 || !root.has-scan;
+                                    row-pressed(i, c, s) => { root.file-pressed(i, c, s); }
+                                    row-double(i) => { root.file-double(i); }
+                                    row-context(i, x, y) => { root.file-context(i, x, y); }
+                                    list-key(t, c, s, p) => { root.file-key(t, c, s, p) }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle { width: 1px; background: Theme.line; }
+                    MapView {
+                        horizontal-stretch: 45;
+                        preferred-width: 0px;
+                        min-width: 280px;
+                        image: root.map-image;
+                        image-w: root.map-image-w;
+                        image-h: root.map-image-h;
+                        title: root.map-title;
+                        total: root.map-total;
+                        can-up: root.map-can-up;
+                        hover-mark: root.map-hover-mark;
+                        select-mark: root.map-select-mark;
+                        hover-text: root.map-hover-text;
+                        hover-size: root.map-hover-size;
+                        legend: root.legend;
+                        filter-text: root.map-filter-text;
+                        empty-text: root.map-empty-text;
+                        inert: root.inert;
+                        resized(w, h) => { root.map-resized(w, h); }
+                        hovered(x, y) => { root.map-hovered(x, y); }
+                        left => { root.map-left(); }
+                        clicked(x, y) => { root.map-clicked(x, y); }
+                        double(x, y) => { root.map-double(x, y); }
+                        up => { root.map-up(); }
+                        clear-filter => { root.map-clear-filter(); }
+                    }
+                }
+
+            }
+
+            // ---- the status line ----
+            Rectangle { height: 1px; background: Theme.line; }
+            Rectangle {
+                height: 26px;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 12px;
+                    Text { text: root.status-left; color: root.status-warn ? Theme.warn-text : Theme.ink-2; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: root.status-right; font-family: Type.mono; color: Theme.ink-3; vertical-alignment: center; overflow: elide; max-width: 360px; }
+                }
+            }
+        }
+    }
+
+    menu := Menu {
+        x: root.menu-x;
+        y: root.menu-y;
+        entries: root.menu-entries;
+        menu-width: 240px;
+        activated(i) => { root.menu-picked(i); }
+    }
+
+    if root.drop-hover: Rectangle {
+        border-width: 2px;
+        border-color: Theme.accent;
+        background: Theme.accent-soft;
+        Text {
+            text: "Drop a folder to scan it";
+            color: Theme.accent;
+            font-size: Type.body;
+            font-weight: Type.strong;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Toasts, newest at the bottom, above the status line; behind an open dialog they stay
+    // in sight, out of the Tab order.
+    VerticalLayout {
+        x: root.width - self.width - 14px;
+        y: root.height - self.height - 40px;
+        width: 380px;
+        height: self.preferred-height;
+        spacing: 8px;
+        for t in root.toasts: Toast {
+            text: t.text;
+            kind: t.kind;
+            action: t.action;
+            inert: root.dialog-open;
+            action-clicked => { root.toast-action(t.id); }
+            dismissed => { root.toast-dismissed(t.id); }
+            copy => { root.copy-text(t.text) }
+        }
+    }
+
+    if root.recycle-open: RecycleDialog {
+        width: root.width;
+        height: root.height;
+        what: root.recycle-what;
+        total: root.recycle-total;
+        note: root.recycle-note;
+        opening => { menu.close(); }
+        confirmed => { root.recycle-confirmed(); }
+        cancelled => { root.recycle-cancelled(); }
+    }
+
+    if root.move-open: MoveDialog {
+        width: root.width;
+        height: root.height;
+        title: root.move-title;
+        state: root.move-state;
+        facts: root.move-facts;
+        link: root.move-link;
+        warnings: root.move-warnings;
+        refusals: root.move-refusals;
+        note: root.move-note;
+        go: root.move-go;
+        can-go: root.move-can-go;
+        cancel: root.move-cancel;
+        can-cancel: root.move-can-cancel;
+        progress: root.move-progress;
+        progress-text: root.move-progress-text;
+        file: root.move-file;
+        opening => { menu.close(); }
+        confirmed => { root.move-confirmed(); }
+        cancelled => { root.move-cancelled(); }
+    }
+
+    if root.about-open: AboutDialog {
+        width: root.width;
+        height: root.height;
+        line: root.about-line;
+        rows: root.check-rows;
+        checking: root.checking;
+        checked: root.checked;
+        check => { root.check-install(); }
+        open-site => { root.open-site(); }
+        closed => {
+            root.about-open = false;
+            root.focus-list();
+        }
+    }
+
+    TipLayer {}
+}

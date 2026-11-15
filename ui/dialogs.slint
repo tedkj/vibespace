@@ -1,0 +1,201 @@
+// VibeSpace's questions: moving things to the Recycle Bin, with the total; moving a folder to
+// another drive (the plan, then the progress); a move that did not finish or cannot go on.
+
+import { Theme, Type, Icons, Icon, Button, ButtonKind, Dialog, ProgressBar } from "@vibeware";
+import { MoveFact } from "types.slint";
+
+export component RecycleDialog {
+    in property <string> what;
+    in property <string> total;
+    in property <string> note;
+    callback confirmed();
+    callback cancelled();
+    callback opening();
+    Dialog {
+        width: root.width;
+        height: root.height;
+        title: "Move to the Recycle Bin?";
+        dialog-width: 440px;
+        enter-accepts: false;
+        opening => { root.opening(); }
+        cancelled => { root.cancelled(); }
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                alignment: start;
+                padding-top: 2px;
+                Icon { path: Icons.trash; tint: Theme.ink-2; }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.what;
+                    wrap: word-wrap;
+                    font-size: Type.body;
+                    color: Theme.ink;
+                }
+                Text {
+                    text: root.total;
+                    font-family: Type.mono;
+                    font-size: Type.small;
+                    color: Theme.ink-2;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        Text {
+            text: root.note;
+            wrap: word-wrap;
+            font-size: Type.small;
+            color: Theme.ink-3;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; kind: ButtonKind.ghost; clicked => { root.cancelled(); } }
+            Button {
+                text: "Move to Recycle Bin";
+                icon: Icons.trash;
+                kind: ButtonKind.danger;
+                clicked => { root.confirmed(); }
+            }
+        }
+    }
+}
+
+// Move to another drive: what goes where and what is in the way (state 1), then the progress
+// (state 2); "Checking…" first (state 0); a move that did not finish (state 3); one that cannot
+// go on, where each side is (state 4), and the confirm to forget its record (state 5). Rust
+// words every line; long paths come with break opportunities at their separators.
+export component MoveDialog {
+    in property <string> title;
+    in property <int> state;
+    in property <[MoveFact]> facts;
+    in property <string> link;
+    in property <[string]> warnings;
+    in property <[string]> refusals;
+    in property <string> note;
+    in property <string> go;
+    in property <bool> can-go;
+    in property <string> cancel;
+    in property <bool> can-cancel;
+    in property <float> progress: -2;
+    in property <string> progress-text;
+    in property <string> file;
+    callback confirmed();
+    callback cancelled();
+    callback opening();
+    Dialog {
+        width: root.width;
+        height: root.height;
+        title: root.title;
+        dialog-width: 560px;
+        enter-accepts: false;
+        opening => { root.opening(); }
+        cancelled => { root.cancelled(); }
+        VerticalLayout {
+            spacing: 4px;
+            for f in root.facts: HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: f.label;
+                    width: 136px;
+                    font-family: Type.mono;
+                    font-size: Type.small;
+                    color: Theme.ink-3;
+                }
+                Text {
+                    text: f.value;
+                    font-family: Type.mono;
+                    font-size: Type.small;
+                    color: Theme.ink;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    min-height: self.preferred-height;
+                }
+            }
+        }
+        if root.link != "": Text {
+            text: root.link;
+            wrap: word-wrap;
+            color: Theme.ink-2;
+            min-height: self.preferred-height;
+        }
+        if root.note != "": Text {
+            text: root.note;
+            wrap: word-wrap;
+            color: Theme.ink-3;
+            min-height: self.preferred-height;
+        }
+        if root.refusals.length > 0: VerticalLayout {
+            spacing: 6px;
+            for r in root.refusals: HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: start;
+                    Icon { path: Icons.alert; tint: Theme.danger; }
+                }
+                Text {
+                    text: r;
+                    wrap: word-wrap;
+                    color: Theme.danger-text;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    min-height: self.preferred-height;
+                }
+            }
+        }
+        if root.warnings.length > 0: VerticalLayout {
+            spacing: 6px;
+            for w in root.warnings: HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: start;
+                    Icon { path: Icons.alert; tint: Theme.warn; }
+                }
+                Text {
+                    text: w;
+                    wrap: word-wrap;
+                    color: Theme.warn-text;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    min-height: self.preferred-height;
+                }
+            }
+        }
+        if root.progress > -1.5: VerticalLayout {
+            spacing: 6px;
+            ProgressBar { value: root.progress; }
+            Text {
+                text: root.progress-text;
+                font-family: Type.mono;
+                font-size: Type.small;
+                color: Theme.ink-2;
+                wrap: word-wrap;
+                min-height: self.preferred-height;
+            }
+            if root.file != "": Text {
+                text: root.file;
+                font-family: Type.mono;
+                font-size: Type.small;
+                color: Theme.ink-3;
+                wrap: word-wrap;
+                min-height: self.preferred-height;
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Button { text: root.cancel; kind: ButtonKind.ghost; enabled: root.can-cancel; clicked => { root.cancelled(); } }
+            Button {
+                text: root.go;
+                icon: root.state == 3 ? Icons.refresh : root.state >= 4 ? Icons.x : Icons.drive;
+                kind: ButtonKind.primary;
+                enabled: root.can-go;
+                clicked => { root.confirmed(); }
+            }
+        }
+    }
+}
